@@ -97,3 +97,106 @@ jobs:
         with:
           name: cypress-videos
           path: cypress/videos
+
+  coverage:
+    name: Report Test Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup PNPM with Dependencies
+        uses: ./.github/actions/setup-pnpm-with-dependencies/
+        with:
+          force-install: true
+
+      # A distinct cache key from the `test` job's. That cache holds all three engines,
+      # this one only Chromium; sharing a key would let a Chromium-only cache satisfy the
+      # three-engine restore.
+      - name: Cache Playwright Chromium
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Install Playwright Chromium
+        run: |
+          echo "::group::Install Playwright Chromium"
+          pnpm test:coverage:install
+          echo "::endgroup::"
+
+      # The most recent successful `main` run uploads its summary as an artifact, so pulling
+      # it here lets the comment show a delta rather than a bare number. It is absent until
+      # the first `main` run after this lands, and the comment simply omits the trend then.
+      - name: Download base branch coverage summary
+        id: base-coverage
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base_run_id="$(gh run list \
+            --workflow publish.yaml \
+            --branch main \
+            --event push \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')"
+
+          if [[ -z "$base_run_id" ]]; then
+            echo "No successful \`main\` run found; skipping the comparison."
+            exit 0
+          fi
+
+          gh run download "$base_run_id" --name coverage-summary --dir coverage-base
+          echo "path=coverage-base/coverage-summary.json" >> "$GITHUB_OUTPUT"
+
+      # Fails the job when a threshold in `vitest.config.ts` is not met.
+      - name: Run Vitest with coverage
+        run: pnpm test:coverage
+
+      - name: Report coverage
+        # Still report when the run failed a threshold — that number is the whole point.
+        if: always()
+        # Pull requests from forks get a read-only `GITHUB_TOKEN` no matter what the
+        # `permissions:` block asks for, so posting the comment 403s there. Without this the
+        # coverage job would fail on every fork PR — and take `run-tests`, and the `publish`
+        # job that needs it, down with it — over a reporting step rather than a real test
+        # failure. The numbers still reach the job summary and the uploaded artifact.
+        continue-on-error: true
+        uses: davelosert/vitest-coverage-report-action@c4bbc33a89b7ace0e63d35f1f7d4bcee31155a73 # v2.13.0
+        with:
+          json-summary-path: ./coverage/coverage-summary.json
+          json-final-path: ./coverage/coverage-final.json
+          json-summary-compare-path: ${{ steps.base-coverage.outputs.path }}
+          file-coverage-mode: changes
+          comment-on: ${{ github.event_name == 'pull_request' && 'pr' || 'none' }}
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: ignore
+
+      # Read back by the base-comparison step above on subsequent pull requests.
+      - name: Upload coverage summary as the new baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-summary
+          path: coverage/coverage-summary.json

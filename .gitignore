@@ -10,6 +10,7 @@ cypress/screenshots
 cypress/videos
 
 **/.vitest-attachments/
+coverage/
 **/__screenshots__
 
 .temp

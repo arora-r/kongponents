@@ -57,6 +57,28 @@ export default defineConfig({
     clearMocks: true,
     restoreMocks: true,
     reporters: ['tree', ...[process.env.GITHUB_ACTIONS ? 'github-actions' : ''].filter(Boolean)],
+    coverage: {
+      provider: 'istanbul',
+      include: ['src/**/*.{ts,vue}'],
+      exclude: [
+        'src/**/index.ts',
+        'src/global-components.ts',
+        'src/types/**',
+        'src/**/*.d.ts',
+        'src/**/*.spec.ts',
+        'src/**/*.cy.ts',
+      ],
+      reporter: ['text', 'html', 'json', 'json-summary'],
+      reportsDirectory: './coverage',
+      reportOnFailure: true,
+      thresholds: {
+        statements: 82,
+        branches: 75,
+        functions: 83,
+        lines: 81,
+        perFile: false,
+      },
+    },
     projects: [
       {
         // `extends: true` inherits the plugins, aliases and CSS options above.
@@ -89,18 +111,21 @@ export default defineConfig({
              * styles and font metrics surface here rather than in a consumer's app.
              * `webkit` is Playwright's WebKit build, not Safari itself — close enough for
              * engine-level differences, but not a substitute for real Safari testing.
+             *
+             * Coverage is the exception: Istanbul instruments script bodies, and no component
+             * branches on the engine (the only vendor-specific code in `src/` is CSS, which
+             * isn't instrumented), so all three engines produce the same coverage map. The
+             * `test:coverage` script sets `COVERAGE` to collect from Chromium alone rather
+             * than re-run the whole matrix for an identical number — which is also why
+             * `test:coverage:install` installs Chromium only.
              */
-            instances: [
-              { browser: 'chromium' },
-              /**
-               * Firefox specifically (not Chromium/WebKit) races real keyboard/focus input
-               * across concurrently-running spec files — a known Vitest issue
-               * (https://github.com/vitest-dev/vitest/issues/7916). Serializing just this
-               * instance avoids it without slowing down the other two engines.
-               */
-              { browser: 'firefox', fileParallelism: false },
-              { browser: 'webkit' },
-            ],
+            instances: process.env.COVERAGE
+              ? [{ browser: 'chromium' }]
+              : [
+                { browser: 'chromium' },
+                { browser: 'firefox', fileParallelism: false },
+                { browser: 'webkit' },
+              ],
             viewport: { width: 1366, height: 768 },
           },
         },

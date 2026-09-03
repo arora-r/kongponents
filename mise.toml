@@ -1,0 +1,4 @@
+# Mirrors the `volta` pins in package.json, which are what CI installs.
+[tools]
+node = "24.14.1"
+pnpm = "10.34.4"

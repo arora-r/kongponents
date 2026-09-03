@@ -36,6 +36,12 @@ jobs:
     name: Tests
     needs:
       - get-changed-files
+    # A called workflow cannot grant itself more than the caller has, and the coverage job
+    # in `test.yaml` needs to read prior run artifacts and post its comment on the PR.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
     uses: ./.github/workflows/test.yaml
 
   publish:
